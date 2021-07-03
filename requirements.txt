@@ -1,0 +1,6 @@
+pystreamable
+discord.py
+python-dotenv
+requests
+twitch-dl
+urlextract
