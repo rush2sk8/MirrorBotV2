@@ -1,5 +1,7 @@
 # Rewrite of MirrorBot
 
+A discord bot that will mirror twitch clips and vreddit links. A rewrite of the original MirrorBot. 
+
 ## Installation
 `pip install -r requirements.txt`
 
