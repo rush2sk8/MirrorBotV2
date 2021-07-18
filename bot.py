@@ -63,8 +63,6 @@ async def twitch(message, url):
             time.sleep(0.5)
 
         await message.channel.send(f'https://streamable.com/{shortcode}')
-        await message.delete()
-
         os.remove(file_name)
     except Exception as e:
         print(e)
@@ -111,7 +109,6 @@ async def reddit(message, url):
             time.sleep(1)
 
         await message.channel.send(f'https://streamable.com/{shortcode} from: {message.author.mention}')
-        await message.delete()
 
         os.remove(final_video_name)
         os.remove("video.mp4")
