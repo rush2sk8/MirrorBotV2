@@ -4,3 +4,4 @@ python-dotenv
 requests
 twitch-dl
 urlextract
+spaw

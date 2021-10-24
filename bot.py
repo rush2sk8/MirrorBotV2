@@ -1,5 +1,4 @@
 import os
-import re
 import subprocess
 import sys
 import time
@@ -7,9 +6,11 @@ import urllib.request
 from pathlib import Path
 from shutil import which
 from urllib.parse import urlsplit, urlunsplit
+import pickledb
 
 import discord
 import requests
+import spaw
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from pystreamable import StreamableApi
@@ -21,8 +22,12 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 S_USER = os.getenv('S_USER')
 S_PASS = os.getenv('S_PASS')
 
+spaw_obj = spaw.SPAW()
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
 streamable_api = StreamableApi(S_USER, S_PASS)
+spaw_obj.auth(S_USER, S_PASS)
+
+db = pickledb.load("urls.db", True)
 
 urls = []
 
@@ -43,81 +48,87 @@ async def run_upload():
             await reddit(message, url)
 
 async def twitch(message, url):
-    try:
-        p = subprocess.check_output(
-            ["twitch-dl", "download", "-q", "source", "--debug", "--no-color", url])
-        output = p.decode('utf-8')
+    db_query = db.get(url)
+    if db_query == False:
+        try:
+            return_code = spaw_obj.videoImport(url)
 
-        title = ''
-        file_name = ''
+            shortcode = return_code["shortcode"]
+            while streamable_api.get_info(shortcode)["percent"] != 100:
+                time.sleep(0.5)
 
-        for x in output.split("\n"):
-            if "Found: " in x:
-                title = re.search(r"Found: (.*) by", x).group(1)
-            elif "Downloaded: " in x:
-                file_name = x.split(" ")[-1].strip().rstrip('\n').rstrip('\r')
-
-        shortcode = streamable_api.upload_video(
-            file_name, title)['shortcode']
-        while streamable_api.get_info(shortcode)["percent"] != 100:
-            time.sleep(0.5)
-
-        await message.channel.send(f'https://streamable.com/{shortcode}')
-        os.remove(file_name)
-    except Exception as e:
-        print(e)
-        pass
-
+            db.set(url, shortcode)
+            await message.channel.send(f'https://streamable.com/{shortcode}')
+        except Exception as e:
+            print(e)
+            pass
+    else:
+        await message.channel.send(f'https://streamable.com/{db_query}')
 
 async def reddit(message, url):
     url = f'{urlunsplit(urlsplit(url)._replace(query="", fragment=""))[:-1]}.json'
-    try:
-        json = requests.get(
-            url, headers={'User-agent': 'reddit-discordbot'}).json()
-        video_url = json[0]["data"]["children"][0]["data"]["secure_media"]["reddit_video"]["fallback_url"]
-
-        video_title = json[0]["data"]["children"][0]["data"]["title"]
-
-        l = video_url.split("DASH")[0]
-        r = video_url.split("?")[-1]
-
-        audio_url = f'{l}DASH_audio.mp4?{r}'
-
-        final_video_name = "video.mp4"
-
-        urllib.request.urlretrieve(
-            video_url, filename=final_video_name)
-
+    db_query = db.get(url)
+    if db_query == False:
         try:
-            urllib.request.urlretrieve(audio_url, filename="audio.mp4")
+            json = requests.get(
+                url, headers={'User-agent': 'reddit-discordbot'}).json()
+            video_url = json[0]["data"]["children"][0]["data"]["secure_media"]["reddit_video"]["fallback_url"]
 
-            subprocess.call(
-                "ffmpeg -y -hide_banner -loglevel error -i video.mp4 -i audio.mp4 -c:v copy -c:a aac output.mp4",
-                shell=True
-            )
+            video_title = json[0]["data"]["children"][0]["data"]["title"]
 
-            final_video_name = "output.mp4"
-            os.remove("audio.mp4")
+            l = video_url.split("DASH")[0]
+            r = video_url.split("?")[-1]
+
+            audio_url = f'{l}DASH_audio.mp4?{r}'
+
+            final_video_name = "video.mp4"
+
+            urllib.request.urlretrieve(
+                video_url, filename=final_video_name)
+
+            try:
+                urllib.request.urlretrieve(audio_url, filename="audio.mp4")
+
+                subprocess.call(
+                    "ffmpeg -y -hide_banner -loglevel error -i video.mp4 -i audio.mp4 -c:v copy -c:a aac output.mp4",
+                    shell=True
+                )
+
+                final_video_name = "output.mp4"
+                os.remove("audio.mp4")
+
+            except Exception:
+                pass
+
+            try:
+                os.rename(final_video_name, f'{video_title}.mp4')
+            except Exception as e:
+                print(e)
+
+            upload_status = spaw_obj.videoUpload(f'{video_title}.mp4')
+            shortcode = upload_status["shortcode"]
+
+            while streamable_api.get_info(shortcode)["percent"] != 100:
+                time.sleep(1)
+
+            db.set(url, shortcode)
+            await message.channel.send(f'https://streamable.com/{shortcode} from: {message.author.mention}')
+
+            try:
+                os.remove(f'{video_title}.mp4')
+                os.remove("video.mp4")
+                os.remove("output.mp4")
+            except Exception as e:
+                print(e)
 
         except Exception:
             pass
-
-        shortcode = streamable_api.upload_video(
-            final_video_name, video_title)['shortcode']
-
-        while streamable_api.get_info(shortcode)["percent"] != 100:
-            time.sleep(1)
-
-        await message.channel.send(f'https://streamable.com/{shortcode} from: {message.author.mention}')
-
-        os.remove(final_video_name)
-        os.remove("video.mp4")
-    except Exception:
-        pass
+    else:
+        await message.channel.send(f'https://streamable.com/{db_query}')
 
 @bot.event
 async def on_message(message):
-    if message.author.id == bot.user.id:
+    if message.author.id == bot.user.id or message.channel.is_nsfw():
         return
 
     m = message.content
