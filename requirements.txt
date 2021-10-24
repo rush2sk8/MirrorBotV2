@@ -5,3 +5,4 @@ requests
 twitch-dl
 urlextract
 spaw
+pickledb
